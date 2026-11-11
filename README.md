@@ -1,36 +1,61 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SDR Research Agent
 
-## Getting Started
+An AI-powered pre-call research pipeline built for Notion's SDR team. Given a list of leads, it automatically generates structured research briefs so reps walk into every call with a sharp hypothesis, grounded evidence, and a non-generic opening question.
 
-First, run the development server:
+## The problem
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+SDR research is repetitive, inconsistent, and slow. Reps either skip it and sound generic, or spend 20–30 minutes per lead doing it manually. Neither scales.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## What it does
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Feed it a lead. Get back a brief in ~30 seconds.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Each brief includes:
+- A value hypothesis tied to the company's specific situation
+- The buying pattern that best fits (see below)
+- 3 evidence bullets sourced from real research
+- One sharp opening question tailored to the contact
+- Red flags to watch for on the call
+- A GPT-4o fact-check score (0–100) on how well the claims are supported
 
-## Learn More
+## Architecture
 
-To learn more about Next.js, take a look at the following resources:
+Three tiers, run in sequence:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+**Tier 1 — Disqualifiers** (sequential, stops early)
+Checks if the company is an existing Notion customer, in financial distress, or outside the target size range. If any fire, the pipeline stops and returns DISQUALIFIED — no Claude call wasted.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+**Tier 2+3 — Research** (parallel)
+13 Serper searches across company news, funding, product launches, job postings, knowledge management signals, contact bio, recent posts, and interviews. Company and contact research run in parallel.
 
-## Deploy on Vercel
+**Synthesis**
+Claude Sonnet reads all research and writes the brief — hypothesis, buying pattern, evidence, opening question, red flags — as structured JSON.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+**Fact-check**
+GPT-4o independently reads the raw research and the finished brief. It has no knowledge of how the brief was written. It scores whether each claim is traceable to the research. This matters: a model can't objectively review its own output.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Buying patterns
+
+| Pattern | When it fits |
+|---|---|
+| **Hyper-Scale Knowledge Chaos** | Rapid headcount growth creating documentation debt |
+| **Cross-Functional Coordination Debt** | Silos between eng, product, ops, and sales |
+| **Multi-Market Alignment at Scale** | Multiple geos or segments needing consistent playbooks |
+| **Startup Velocity Preservation** | Post-funding, want to move fast without losing culture or context |
+
+## Stack
+
+**Python 3**
+**Anthropic Claude Sonnet** — research synthesis
+**OpenAI GPT-4o** — independent fact-check
+**Serper** — Google search API (13 searches per lead)
+**Notion API** — brief output destination
+## Key design decisions
+
+**Disqualifiers before synthesis** — the pipeline stops the moment a lead fails a check. No brief is generated for a bad lead. This isn't just about efficiency — it's about trust. An SDR who opens a Notion page and reads a full hypothesis for a company that turns out to be an existing customer loses confidence in the tool.
+
+**Two models, two jobs** — Claude writes the brief, GPT-4o checks it. The separation is what makes the verification meaningful. A model reviewing its own output reads it charitably. An independent model doesn't.
+
+**Query + prompt, both layers** — the original Notion customer check was returning false positives because competitor comparison pages matched the query. The fix required tightening the search query *and* the synthesis prompt simultaneously. One layer wasn't enough.
+
+---
